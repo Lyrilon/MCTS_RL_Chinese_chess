@@ -10,13 +10,13 @@ from PolicyValueNet import PolicyValueNet
 
 # selfplay 写完了，利用selfplay可以实现一局对局，
 class selfplay():
-    def __init__(self,play_times,mcts_search_round,temperature,num_gpu):
+    def __init__(self,play_times,mcts_search_round,temperature,num_gpu,PV_net):
         self.play_times = play_times
         self.mcts_search_round=mcts_search_round
         self.temperature=temperature
         self.board = Chess_board()
         self.num_gpu = num_gpu
-        self.PV_net = PolicyValueNet(self.num_gpu,num_of_res_block=19)
+        self.PV_net = PV_net
         self.mcts_tree = Mcts("RNBAKABNR/9/1C5C1/P1P1P1P1P/9/9/p1p1p1p1p/1c5c1/9/rnbakabnr",self.PV_net,search_threads=16)
     def selfplay_n_times(self):
         data_per_round=[]

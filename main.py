@@ -4,7 +4,9 @@ from mcts import Mcts
 from PolicyValueNet import PolicyValueNet
 from chessboard import Chess_board
 from self_play import selfplay  # 假定 selfplay 类已定义
+import numpy as np
 
+import torch
 class CChessTrainer:
     def __init__(self, train_epoch, batch_size):
         self.train_epoch = train_epoch
@@ -15,15 +17,83 @@ class CChessTrainer:
         self.PV_net = PolicyValueNet(num_gpus=1, num_of_res_block=19)
         self.mcts = Mcts("RNBAKABNR/9/1C5C1/P1P1P1P1P/9/9/p1p1p1p1p/1c5c1/9/rnbakabnr", 
                          self.PV_net, search_threads=16)
-
+        
+        self.kl_target = 0.025
+        self.learning_rate = 0.001 
+        self.lr_multiplier = 1
+        self.epoch = 5
     def selfplay(self):
         # 返回 selfplay 数据和每局步数
-        sp = selfplay(play_times=1, mcts_search_round=100, temperature=1.0, num_gpu=1)
+        sp = selfplay(play_times=1, mcts_search_round=100, temperature=1.0, num_gpu=1,PV_net=self.PV_net)
         return sp.selfplay_n_times()
 
     def policy_update(self):
-        # 占位，采样 self.data_buffer 进行训练更新
-        pass
+        import random
+        import torch.nn.functional as F
+
+        # 数据不足则不更新
+        if len(self.data_buffer) < self.batch_size:
+            return
+
+        # 随机采样一个 mini-batch，并清空数据缓冲区（可根据需要调整保留策略）
+        mini_batch = random.sample(self.data_buffer, self.batch_size)
+        self.data_buffer = []
+
+        # 分离数据
+        state_batch = np.array([data[0] for data in mini_batch])       # shape: [batch, 9, 10, 14]
+        mcts_probs_batch = np.array([data[1] for data in mini_batch])    # shape: [batch, 2086]
+        winner_batch = np.array([data[2] for data in mini_batch])        # shape: [batch,]
+        winner_batch = np.expand_dims(winner_batch, 1)                   # shape: [batch, 1]
+
+        start_time = time.time()
+
+        # 计算旧的策略概率，先将模型置为 eval 模式
+        self.PV_net.eval()
+        with torch.no_grad():
+            old_policy_logits, old_v = self.PV_net.forward(state_batch)
+            # 转为 softmax 概率
+            old_probs = F.softmax(old_policy_logits, dim=1).detach().cpu().numpy()
+        self.PV_net.train()
+
+        # 对同一 mini-batch 进行多轮更新
+        for epoch in range(self.epochs):
+            # 执行一次训练更新
+            acc, loss, global_step = self.PV_net.train_step((state_batch, mcts_probs_batch, winner_batch))
+            
+            # 更新后计算新的策略概率
+            self.PV_net.eval()
+            with torch.no_grad():
+                new_policy_logits, new_v = self.PV_net.forward(state_batch)
+                new_probs = F.softmax(new_policy_logits, dim=1).detach().cpu().numpy()
+            self.PV_net.train()
+
+            # 避免概率中出现0
+            old_probs_safe = np.where(old_probs > 1e-10, old_probs, 1e-10)
+            new_probs_safe = np.where(new_probs > 1e-10, new_probs, 1e-10)
+            # 计算 KL 散度
+            kl = np.mean(np.sum(old_probs_safe * (np.log(old_probs_safe) - np.log(new_probs_safe)), axis=1))
+            
+            # 若 KL 散度过大则提前停止本 mini-batch 的训练更新
+            if kl > self.kl_targ * 4:
+                break
+
+        print("[Policy-Value-Net] -> Training Took {} s".format(time.time() - start_time))
+        print("[Policy-Value-Net] -> Global Step: {}, Accuracy: {:.4f}, Loss: {:.4f}".format(global_step, acc, loss))
+
+        if kl > self.kl_targ * 2 and self.lr_multiplier > 0.1:
+            self.lr_multiplier /= 1.5
+        elif kl < self.kl_targ / 2 and self.lr_multiplier < 10:
+            self.lr_multiplier *= 1.5
+        print(
+            "[Policy-Value-Net] -> KL Divergence:{}; \t\tLr Multiplier:{}; \n[Policy-Value-Net] -> Loss:{}; \t\t\tAccuracy:{}; \n[Policy-Value-Net] -> Explained Var (old):{}; \t\t\tExplained Var (new):{};\n".format(
+                kl, self.lr_multiplier, loss, acc, explained_var_old, explained_var_new))
+        
+        explained_var_old = 1 - torch.var(winner_batch - old_v.squeeze()) / torch.var(winner_batch)
+        explained_var_new = 1 - torch.var(winner_batch - new_v.squeeze()) / torch.var(winner_batch)
+
+        print(
+            "[Policy-Value-Net] -> KL Divergence:{}; \t\tLr Multiplier:{}; \n[Policy-Value-Net] -> Loss:{}; \t\t\tAccuracy:{}; \n[Policy-Value-Net] -> Explained Var (old):{}; \t\t\tExplained Var (new):{};\n".format(
+                kl, self.lr_multiplier, loss, acc, explained_var_old, explained_var_new))
 
     def run(self):
         batch_iter = 0
