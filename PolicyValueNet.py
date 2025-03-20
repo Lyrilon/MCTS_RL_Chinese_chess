@@ -21,7 +21,6 @@ def state_to_positions(state):
             if v.isalpha():
                 pieces_plane[rank][file][ind[v]] = 1
     assert pieces_plane.shape == (9, 10, 14)
-
     return pieces_plane
 
 def input_preprocess(state,player):
@@ -79,7 +78,7 @@ class ResidualBlock(nn.Module):
         return out
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, num_gpus, num_of_res_block=19):
+    def __init__(self, num_gpus, num_of_res_block=9):
         super(PolicyValueNet, self).__init__()
         print("init gpu net")
         self.save_path = "./gpu_models"

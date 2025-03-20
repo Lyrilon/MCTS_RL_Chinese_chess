@@ -8,6 +8,24 @@ from PolicyValueNet import PolicyValueNet
 
 #selfplay 的棋盘始终保持正向，在传入valuepolicy net需要反转，mcts也是
 
+def try_flip(state, flip=False):
+    if not flip:
+        return state
+
+    rows = state.split('/')
+
+    #大小写互转
+    def swapcase(a):
+        if a.isalpha():
+            return a.lower() if a.isupper() else a.upper()
+        return a
+    #对所有大小写互转
+    def swapall(aa):
+        return "".join([swapcase(a) for a in aa])
+    return "/".join([swapall(row) for row in reversed(rows)])
+
+
+
 # selfplay 写完了，利用selfplay可以实现一局对局，
 class selfplay():
     def __init__(self,play_times,mcts_search_round,temperature,num_gpu,PV_net):
@@ -17,7 +35,7 @@ class selfplay():
         self.board = Chess_board()
         self.num_gpu = num_gpu
         self.PV_net = PV_net
-        self.mcts_tree = Mcts("RNBAKABNR/9/1C5C1/P1P1P1P1P/9/9/p1p1p1p1p/1c5c1/9/rnbakabnr",self.PV_net,search_threads=16)
+        self.mcts_tree = Mcts("RNBAKABNR/9/1C5C1/P1P1P1P1P/9/9/p1p1p1p1p/1c5c1/9/rnbakabnr",self.PV_net,search_threads=8)
     def selfplay_n_times(self):
         data_per_round=[]
         episode_per_round = []
@@ -36,9 +54,9 @@ class selfplay():
 
                 #mct的可能动作和对应的prob
                 action_label,label_prob =action_probs[0][0],action_probs[0][1]
-
-
-                states.append(self.board.encode_chessboard())
+                encoded_board=self.board.encode_chessboard()
+                state= try_flip(encoded_board,self.board.turn == 'b')
+                states.append(state)
                 action_prob =[0]*2086
                 
                 # 判断一下当前是什么turn
@@ -61,7 +79,7 @@ class selfplay():
                     #tie
                     self.board.over = 1
                     self.board.winner = 't'
-                    print(f"Self-Play: Round{round} Over,taking {time.time()-start_time}")
+                    print(f"Self-Play: Round{move_round} Over,taking {time.time()-start_time}")
                 #这块代码写的很迷惑
                 if self.board.over:
                     z = np.zeros(len(current_players))
@@ -77,3 +95,6 @@ class selfplay():
             
 
 
+"""
+针对selfplay，输出的states,mcts_probs,z没有任何的方向倾向，可以认为是队长态完全等价的描述
+"""

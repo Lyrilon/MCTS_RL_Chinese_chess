@@ -11,6 +11,9 @@ import torch
 from chessboard import flip_policy
 from chessboard import action_label2i
 from tqdm import trange
+from sys import getsizeof
+
+from memory_profiler import profile
 
 c_PUCT = 5
 Nx=9
@@ -520,7 +523,7 @@ class Mcts():
         item = QueueItem(features,future)
         await self.queue.put(item)
         return future
-       
+
     async def start_tree_search(self,node, current_player, restrict_round):
         """
         在蒙特卡罗树搜索（MCTS）这种多线程或多协程并发执行的场景中，可能会有多个
@@ -542,7 +545,7 @@ class Mcts():
 
             await future
 
-            action_probs ,value = future.result()
+            action_probs,value = future.result()
             action_probs=action_probs.detach().numpy()
             # action_probs, value = self.forward(positions)
             if current_player == 'b':
@@ -551,8 +554,9 @@ class Mcts():
             moves = get_legal_moves(node.state,current_player)
 
             node.expand(moves,action_probs)
-
             self.now_expanding.remove(node)
+            
+
 
             return value[0]*-1
         else:
@@ -589,7 +593,7 @@ class Mcts():
             else:
                 value = await self.start_tree_search(node,current_player,restrict_round)
 
-            node.N += -self.virtual_loss
+            node.N -= self.virtual_loss
             node.W += self.virtual_loss
 
             node.back_up_v(value)
@@ -631,7 +635,6 @@ class Mcts():
         if(find == False):
             print("{} not exist in the child".format(move))
         return ret
-    
     def mcts(self,cur_player,search_round,temperature,restrict_round)-> tuple[list,list,int]:
         node  = self.root
         if node not in self.expanded:
@@ -645,14 +648,15 @@ class Mcts():
             move_set = get_legal_moves(node.state,cur_player)
             node.expand(move_set,action_probs)
             self.expanded.add(node)
-        
+
         coroutine_set = []
-        for i in range(search_round):
+        for _ in range(search_round):
             task = self.tree_search(node,cur_player,restrict_round)
             coroutine_set.append(task)
         coroutine_set.append(self.critic())
+
+
         self.loop.run_until_complete(asyncio.gather(*coroutine_set))
-        print("mcts finished")
         # 获取键列表
         actions = list(self.root.child.keys())
         # 获取值对象的 N 属性列表
