@@ -1,3 +1,3 @@
 # MCTS_RL_Chinese_chess
-descrip
+because of lack of trainning,the agent is still stupid.
 
